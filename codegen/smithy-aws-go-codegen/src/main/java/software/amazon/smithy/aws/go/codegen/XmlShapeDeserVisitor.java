@@ -319,9 +319,15 @@ public class XmlShapeDeserVisitor extends DocumentShapeDeserVisitor {
         GoWriter writer = context.getWriter().get();
         SymbolProvider symbolProvider = context.getSymbolProvider();
         Model model = context.getModel();
+        var responsePositionTrait = shape.getTrait(ResponsePositionTrait.class);
+        System.out.println("DeSer "+shape.getId().getName()+" shape type: "+ shape.getType().toString()+" has sort order "+(shape.hasTrait(ResponsePositionTrait.ID))+ "or in its childs "+!responsePositionTrait.isEmpty());
 
         // initialize the output member variable
         generatesInitializerForOutputVariable(context, shape);
+
+        if(responsePositionTrait.isPresent()) {
+            writer.write("responsePos := "+responsePositionTrait.get().getInitValue());
+        }
         // Deserialize member shapes modeled with xml attribute trait
         if (hasXmlAttributeTraitMember(shape)) {
             writer.openBlock("for _, attr := range decoder.StartEl.Attr {", "}", () -> {
@@ -367,7 +373,7 @@ public class XmlShapeDeserVisitor extends DocumentShapeDeserVisitor {
                 Set<MemberShape> members = new TreeSet<>(shape.members());
                 for (MemberShape member : members) {
                     // check if member is not a document binding or has a xmlAttribute trait
-                    if (!memberFilter.test(member) || member.hasTrait(XmlAttributeTrait.ID)) {
+                    if (!memberFilter.test(member) || member.hasTrait(XmlAttributeTrait.ID) || member.hasTrait(TransientForDeserializationTrait.ID)) {
                         continue;
                     }
                     String memberName = symbolProvider.toMemberName(member);
@@ -377,6 +383,15 @@ public class XmlShapeDeserVisitor extends DocumentShapeDeserVisitor {
                         String dest = "sv." + memberName;
                         model.expectShape(member.getTarget()).accept(
                                 getMemberDeserVisitor(member, dest, false));
+                        if(responsePositionTrait.isPresent() && responsePositionTrait.get().getMembersWithSortOrder().contains(memberName)) {
+                            var target = model.getShape(member.getTarget()).get();
+                            var arrayIndex = "";
+                            if(target.isListShape()) {
+                                arrayIndex="[len(sv."+memberName+")-1]";
+                            }
+                            writer.write("sv."+memberName + arrayIndex + "."+ responsePositionTrait.get().getSortOrderMemberName() + " = &responsePos");
+                            writer.write("responsePos++");
+                        }
                     });
                 }
 
